@@ -66,6 +66,16 @@ export async function drainOutbox(
         );
         continue;
       }
+      // Attendance can be corrected while the outbox lease is being acquired.
+      // Re-read the persisted three-day eligibility immediately before delivery.
+      if ((await absenceCount(db, o.group_id, o.target_id, now)) < 3) {
+        await run(
+          db,
+          "UPDATE aid_outbox SET status='waiting_eligibility',lease_until=NULL WHERE id=?",
+          o.id,
+        );
+        continue;
+      }
       const response = await fetcher(agency.url, {
         method: "POST",
         redirect: "error",

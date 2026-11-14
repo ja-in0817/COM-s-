@@ -13,7 +13,7 @@ import {
   uid,
   requireGroup,
   activeMember,
-  absenceCount,
+  absenceEvidence,
   notify,
 } from "./db.mjs";
 export async function listGroups(
@@ -98,9 +98,20 @@ export async function groupDetail(db, gid, user, now) {
     `SELECT m.user_id,m.status,m.joined_at,p.nickname,p.role FROM members m JOIN profiles p ON p.id=m.user_id WHERE m.group_id=? ${owner ? "" : "AND m.status='active'"} ORDER BY m.joined_at`,
     gid,
   );
-  for (const m of members)
-    m.unannounced_absences =
-      m.status === "active" ? await absenceCount(db, gid, m.user_id, now) : 0;
+  for (const m of members) {
+    const evidence =
+      m.status === "active"
+        ? await absenceEvidence(db, gid, m.user_id, now)
+        : { days: [], logs: [] };
+    m.unannounced_absences = evidence.days.length;
+    m.absence_dates = evidence.days;
+    m.absence_logs = evidence.logs.slice(0, 10);
+    m.can_request_care =
+      m.status === "active" &&
+      m.user_id !== user &&
+      m.user_id !== g.owner_id &&
+      evidence.days.length >= 3;
+  }
   const proposals = await rows(
     db,
     `SELECT p.*,u.nickname,(SELECT COUNT(*) FROM votes v JOIN members m ON m.group_id=p.group_id AND m.user_id=v.user_id AND m.status='active' WHERE v.proposal_id=p.id) AS votes,(SELECT COUNT(*) FROM votes v WHERE v.proposal_id=p.id AND v.user_id=?) AS voted FROM proposals p JOIN profiles u ON u.id=p.author_id WHERE p.group_id=? ORDER BY p.created_at DESC LIMIT 100`,
@@ -414,6 +425,14 @@ export async function groupAction(db, gid, user, action, data, now) {
         ))
       )
         status = "excused";
+      if (
+        status === "absent" &&
+        s.starts_at + (g.study_minutes + g.play_minutes) * 60000 > now
+      )
+        fail(
+          422,
+          "예정된 모임 시간이 끝난 뒤에만 안내 없는 불참을 기록할 수 있어요.",
+        );
       statements.push(
         statement(
           db,

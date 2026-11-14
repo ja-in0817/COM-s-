@@ -10,8 +10,8 @@ import {
   uid,
   requireGroup,
   activeMember,
-  absenceCount,
-  absencesSql,
+  absenceEvidence,
+  absenceProof,
   notify,
 } from "./db.mjs";
 const validCare = `SELECT COUNT(*) FROM care_requests r JOIN care_cases c ON c.id=r.case_id JOIN members m ON m.group_id=c.group_id AND m.user_id=r.reporter_id AND m.status='active' WHERE r.case_id=?`;
@@ -89,22 +89,17 @@ export async function safetyAction(db, gid, user, action, data, now) {
     );
     const id = uid();
     if (action === "care-request") {
-      if ((await absenceCount(db, gid, target, now)) < 3)
-        fail(
-          422,
-          "사전 안내 없는 불참이 3회 누적되어야 안부 확인을 요청할 수 있어요.",
-        );
+      const evidence = await absenceEvidence(db, gid, target, now);
+      const proof = absenceProof(evidence, gid, target, now);
       await db.batch([
         statement(
           db,
-          `INSERT OR IGNORE INTO care_cases(id,group_id,target_id,created_at) SELECT ?,?,?,? WHERE (${absencesSql})>=3 AND EXISTS(SELECT 1 FROM members WHERE group_id=? AND user_id=? AND status='active') AND EXISTS(SELECT 1 FROM members WHERE group_id=? AND user_id=? AND status='active')`,
+          `INSERT OR IGNORE INTO care_cases(id,group_id,target_id,created_at) SELECT ?,?,?,? WHERE (${proof.sql})>=3 AND EXISTS(SELECT 1 FROM members WHERE group_id=? AND user_id=? AND status='active') AND EXISTS(SELECT 1 FROM members WHERE group_id=? AND user_id=? AND status='active')`,
           id,
           gid,
           target,
           now,
-          gid,
-          target,
-          now,
+          ...proof.params,
           gid,
           user,
           gid,
@@ -112,7 +107,7 @@ export async function safetyAction(db, gid, user, action, data, now) {
         ),
         statement(
           db,
-          `INSERT OR IGNORE INTO care_requests(case_id,reporter_id,reason,created_at) SELECT id,?,?,? FROM care_cases WHERE group_id=? AND target_id=? AND status='open' AND EXISTS(SELECT 1 FROM members WHERE group_id=? AND user_id=? AND status='active') AND (${absencesSql})>=3`,
+          `INSERT OR IGNORE INTO care_requests(case_id,reporter_id,reason,created_at) SELECT id,?,?,? FROM care_cases WHERE group_id=? AND target_id=? AND status='open' AND EXISTS(SELECT 1 FROM members WHERE group_id=? AND user_id=? AND status='active') AND (${proof.sql})>=3`,
           user,
           reason,
           now,
@@ -120,25 +115,28 @@ export async function safetyAction(db, gid, user, action, data, now) {
           target,
           gid,
           user,
-          gid,
-          target,
-          now,
+          ...proof.params,
         ),
         statement(
           db,
-          `INSERT OR IGNORE INTO aid_outbox(id,case_id,status,next_attempt_at,created_at) SELECT ?,c.id,'pending',?,? FROM care_cases c WHERE c.group_id=? AND c.target_id=? AND c.status='open' AND (SELECT COUNT(*) FROM care_requests r JOIN members m ON m.group_id=c.group_id AND m.user_id=r.reporter_id AND m.status='active' WHERE r.case_id=c.id)>=3`,
+          `INSERT OR IGNORE INTO aid_outbox(id,case_id,status,next_attempt_at,created_at) SELECT ?,c.id,'pending',?,? FROM care_cases c WHERE c.group_id=? AND c.target_id=? AND c.status='open' AND (SELECT COUNT(*) FROM care_requests r JOIN members m ON m.group_id=c.group_id AND m.user_id=r.reporter_id AND m.status='active' WHERE r.case_id=c.id)>=3 AND (${proof.sql})>=3`,
           uid(),
           now,
           now,
           gid,
           target,
+          ...proof.params,
         ),
       ]);
       const c = await one(
         db,
-        "SELECT id FROM care_cases WHERE group_id=? AND target_id=? AND status='open'",
+        `SELECT c.id FROM care_cases c JOIN care_requests r ON r.case_id=c.id
+         WHERE c.group_id=? AND c.target_id=? AND c.status='open' AND r.reporter_id=?
+         AND (${proof.sql})>=3`,
         gid,
         target,
+        user,
+        ...proof.params,
       );
       if (!c) fail(409, "참여 상태나 출석이 변경됐어요. 다시 확인해 주세요.");
       await db.batch([

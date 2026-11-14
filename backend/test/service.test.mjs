@@ -59,13 +59,13 @@ async function join(f, users = ["a", "b", "c", "d"]) {
 }
 async function missed(f, target = "a", n = 3) {
   for (let i = 0; i < n; i++) {
-    const t = f.ctx.now + 1000;
+    const t = f.ctx.now + 86400000;
     const s = await f.act("owner", "session", {
       starts_at: t,
       note: "이번 모임",
     });
     assert.equal(s.status, 200);
-    f.ctx.now = t + 1000;
+    f.ctx.now = t + 40 * 60000 + 1000;
     const r = await f.act("owner", "attendance", {
       session_id: s.body.id,
       records: [{ user_id: target, status: "absent" }],
@@ -563,6 +563,275 @@ test("closed welfare case cancels undelivered messages even after group archive"
     assert.equal(
       f.db.raw.prepare("SELECT status FROM aid_outbox").get().status,
       "cancelled",
+    );
+  } finally {
+    f.db.close();
+  }
+});
+
+async function logAbsenceAt(f, startsAt) {
+  const s = await f.act("owner", "session", { starts_at: startsAt });
+  assert.equal(s.status, 200);
+  f.ctx.now = startsAt + 40 * 60000 + 1000;
+  assert.equal(
+    (
+      await f.act("owner", "attendance", {
+        session_id: s.body.id,
+        records: [{ user_id: "a", status: "absent" }],
+      })
+    ).status,
+    200,
+  );
+  return s.body.id;
+}
+const absenceMember = async (f) =>
+  (await f.api("owner", `groups/${f.gid}`)).body.members.find(
+    (m) => m.user_id === "a",
+  );
+
+test("missing logs and forged client counts never authorize a welfare request; three logged dates do", async () => {
+  const f = await fixture();
+  try {
+    await join(f);
+    const forged = {
+      target_id: "a",
+      reason: "확인 요청",
+      unannounced_absences: 99,
+      can_request_care: true,
+      absence_dates: ["2020-01-01", "2020-01-02", "2020-01-03"],
+    };
+    assert.equal((await f.act("owner", "care-request", forged)).status, 422);
+    await missed(f, "a", 2);
+    assert.equal((await f.act("owner", "care-request", forged)).status, 422);
+    assert.equal(
+      f.db.raw.prepare("SELECT COUNT(*) n FROM care_cases").get().n,
+      0,
+    );
+    let member = await absenceMember(f);
+    assert.equal(member.unannounced_absences, 2);
+    assert.equal(member.can_request_care, false);
+    await missed(f, "a", 1);
+    member = await absenceMember(f);
+    assert.equal(member.unannounced_absences, 3);
+    assert.equal(new Set(member.absence_dates).size, 3);
+    assert.equal(member.can_request_care, true);
+    assert.equal(member.absence_logs.length, 3);
+    assert.ok(
+      member.absence_logs.every((log) => log.recorded_at > log.starts_at),
+    );
+    assert.equal((await care(f, "owner")).status, 200);
+  } finally {
+    f.db.close();
+  }
+});
+
+test("three completed absences on one local date count as only one day", async () => {
+  const f = await fixture();
+  try {
+    await join(f);
+    const day = Date.parse("2030-01-01T00:00:00Z");
+    f.ctx.now = day - 60000;
+    for (const hour of [0, 3, 6]) await logAbsenceAt(f, day + hour * 3600000);
+    const member = await absenceMember(f);
+    assert.equal(member.unannounced_absences, 1);
+    assert.equal(member.absence_logs.length, 3);
+    assert.deepEqual(member.absence_dates, ["2030-01-01"]);
+    assert.equal(member.can_request_care, false);
+    assert.equal((await care(f, "owner")).status, 422);
+    assert.equal(
+      f.db.raw.prepare("SELECT COUNT(*) n FROM care_requests").get().n,
+      0,
+    );
+  } finally {
+    f.db.close();
+  }
+});
+
+test("calendar days use the group timezone, including quarter-hour offsets", async () => {
+  const f = await fixture();
+  try {
+    await join(f);
+    f.db.raw
+      .prepare("UPDATE groups SET timezone=? WHERE id=?")
+      .run("Asia/Kathmandu", f.gid);
+    f.ctx.now = Date.parse("2030-01-01T16:00:00Z");
+    await logAbsenceAt(f, Date.parse("2030-01-01T17:10:00Z"));
+    await logAbsenceAt(f, Date.parse("2030-01-01T18:20:00Z"));
+    await logAbsenceAt(f, Date.parse("2030-01-02T03:00:00Z"));
+    assert.deepEqual((await absenceMember(f)).absence_dates, [
+      "2030-01-02",
+      "2030-01-01",
+    ]);
+    assert.equal((await care(f, "owner")).status, 422);
+    await logAbsenceAt(f, Date.parse("2030-01-02T18:20:00Z"));
+    assert.equal((await care(f, "owner")).status, 200);
+  } finally {
+    f.db.close();
+  }
+});
+
+test("the repeated hour at a daylight-saving transition is not a second day", async () => {
+  const f = await fixture();
+  try {
+    await join(f);
+    f.db.raw
+      .prepare("UPDATE groups SET timezone=? WHERE id=?")
+      .run("America/New_York", f.gid);
+    f.ctx.now = Date.parse("2030-11-03T04:00:00Z");
+    await logAbsenceAt(f, Date.parse("2030-11-03T05:10:00Z"));
+    await logAbsenceAt(f, Date.parse("2030-11-03T06:10:00Z"));
+    assert.deepEqual((await absenceMember(f)).absence_dates, ["2030-11-03"]);
+    assert.equal((await care(f, "owner")).status, 422);
+  } finally {
+    f.db.close();
+  }
+});
+
+test("participants cannot create absence logs; future and unfinished sessions cannot be marked absent", async () => {
+  const f = await fixture();
+  try {
+    await join(f);
+    const t = f.ctx.now + 86400000;
+    const s = await f.act("owner", "session", { starts_at: t });
+    const data = {
+      session_id: s.body.id,
+      records: [{ user_id: "a", status: "absent", updated_at: t + 86400000 }],
+      now: t + 86400000,
+    };
+    assert.equal((await f.act("owner", "attendance", data)).status, 422);
+    f.ctx.now = t + 1000;
+    assert.equal((await f.act("owner", "attendance", data)).status, 422);
+    f.ctx.now = t + 40 * 60000;
+    assert.equal((await f.act("b", "attendance", data)).status, 403);
+    assert.equal(
+      f.db.raw.prepare("SELECT COUNT(*) n FROM attendance").get().n,
+      0,
+    );
+    assert.equal((await f.act("owner", "attendance", data)).status, 200);
+    assert.equal((await absenceMember(f)).unannounced_absences, 1);
+  } finally {
+    f.db.close();
+  }
+});
+
+test("correcting or cancelling a qualifying log immediately disables new welfare requests", async () => {
+  const f = await fixture();
+  try {
+    await join(f);
+    await missed(f);
+    await care(f, "owner");
+    const id = f.db.raw
+      .prepare("SELECT session_id FROM attendance WHERE user_id='a' LIMIT 1")
+      .get().session_id;
+    assert.equal(
+      (
+        await f.act("owner", "attendance", {
+          session_id: id,
+          records: [{ user_id: "a", status: "present" }],
+        })
+      ).status,
+      200,
+    );
+    assert.equal((await absenceMember(f)).can_request_care, false);
+    assert.equal((await care(f, "b")).status, 422);
+    assert.equal(
+      f.db.raw.prepare("SELECT COUNT(*) n FROM care_requests").get().n,
+      1,
+    );
+    assert.equal(
+      (
+        await f.act("owner", "attendance", {
+          session_id: id,
+          records: [{ user_id: "a", status: "absent" }],
+        })
+      ).status,
+      200,
+    );
+    assert.equal((await absenceMember(f)).can_request_care, true);
+    await f.act("owner", "cancel-session", { session_id: id });
+    assert.equal((await care(f, "c")).status, 422);
+  } finally {
+    f.db.close();
+  }
+});
+
+test("a correction racing the report write cannot insert a request or create an agency job", async () => {
+  const f = await fixture();
+  try {
+    await join(f);
+    await missed(f);
+    await care(f, "owner");
+    const original = f.db.batch.bind(f.db);
+    let changed = false;
+    f.db.batch = async (statements) => {
+      if (
+        !changed &&
+        statements.some((s) =>
+          s.sql.includes("INSERT OR IGNORE INTO care_cases"),
+        )
+      ) {
+        changed = true;
+        f.db.raw
+          .prepare(
+            "UPDATE attendance SET status='present' WHERE session_id=(SELECT session_id FROM attendance WHERE user_id='a' LIMIT 1) AND user_id='a'",
+          )
+          .run();
+      }
+      return original(statements);
+    };
+    assert.equal((await care(f, "b")).status, 409);
+    assert.equal(
+      f.db.raw.prepare("SELECT COUNT(*) n FROM care_requests").get().n,
+      1,
+    );
+    assert.equal(
+      f.db.raw.prepare("SELECT COUNT(*) n FROM aid_outbox").get().n,
+      0,
+    );
+  } finally {
+    f.db.close();
+  }
+});
+
+test("legacy queued requests with three sessions on one day cannot reach an agency", async () => {
+  const f = await fixture();
+  try {
+    await join(f);
+    const t = Date.parse("2030-01-01T00:00:00Z");
+    f.ctx.now = t - 60000;
+    for (const hour of [0, 3, 6]) await logAbsenceAt(f, t + hour * 3600000);
+    f.db.raw
+      .prepare(
+        "INSERT INTO care_cases(id,group_id,target_id,created_at) VALUES ('legacy-case',?,'a',?)",
+      )
+      .run(f.gid, f.ctx.now);
+    for (const user of ["owner", "b", "c"])
+      f.db.raw
+        .prepare(
+          "INSERT INTO care_requests(case_id,reporter_id,reason,created_at) VALUES ('legacy-case',?,'확인',?)",
+        )
+        .run(user, f.ctx.now);
+    f.db.raw
+      .prepare(
+        "INSERT INTO aid_outbox(id,case_id,next_attempt_at,created_at) VALUES ('legacy-job','legacy-case',?,?)",
+      )
+      .run(f.ctx.now, f.ctx.now);
+    let sent = 0;
+    await drainOutbox(
+      f.db,
+      { url: "https://agency.example.test", token: "test" },
+      async () => {
+        sent++;
+        return new Response("");
+      },
+      f.ctx.now,
+    );
+    assert.equal(sent, 0);
+    assert.equal(
+      f.db.raw
+        .prepare("SELECT status FROM aid_outbox WHERE id='legacy-job'")
+        .get().status,
+      "waiting_eligibility",
     );
   } finally {
     f.db.close();
