@@ -1,6 +1,7 @@
 # wargether
 
 전쟁으로 일상이 바뀐 사람들이 **학습 + 여가** 모임에서 관계를 이어 가는 서비스입니다. React 프런트엔드, Cloudflare Workers API 서버, 영구 D1 데이터베이스로 구성됩니다. 브라우저 localStorage 스냅샷을 신뢰하던 이전 버전을 대체합니다.
+사이트 주소: https://moa-together-za-in.brawnydream4.chatgpt.site/
 
 ## 구조
 
