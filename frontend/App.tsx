@@ -385,6 +385,19 @@ export default function App() {
       title: "함께할 모임 열기",
       description:
         "배우는 시간과 쉬는 시간을 한 쌍으로 만들어요. 구체적인 주제는 참여자들의 제안으로 바꿀 수 있어요.",
+      content: (
+        <aside
+          className="group-creation-guidance"
+          aria-labelledby="group-creation-guidance-title"
+        >
+          <h3 id="group-creation-guidance-title">연결이 먼저예요</h3>
+          <p>
+            wargether의 주된 목적은 서로의 연결입니다. 학습과 여가가 부담이나
+            압박이 되지 않도록 진행해 주세요. 성과와 참여를 강요하기보다 각자의
+            상황과 속도를 존중해 주세요.
+          </p>
+        </aside>
+      ),
       fields: [
         {
           key: "title",

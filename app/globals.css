@@ -1507,6 +1507,26 @@ textarea::placeholder {
   line-height: 1.95;
   margin-bottom: 22px;
 }
+.group-creation-guidance {
+  margin-bottom: 22px;
+  padding: 16px 18px;
+  border: 1px solid #dce4d5;
+  border-radius: 12px;
+  background: #f3f6ef;
+  color: #4c6242;
+}
+.group-creation-guidance h3 {
+  margin: 0 0 7px;
+  font-size: 13px;
+  font-weight: 650;
+}
+.group-creation-guidance p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.85;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
 .form-fields {
   display: grid;
   gap: 17px;
