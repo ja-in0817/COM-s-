@@ -54,6 +54,21 @@ const attendanceLabels: Record<string, string> = {
   excused: "사전 안내 / 사유 있음",
   connectivity: "통신 장애",
 };
+function GroupCreationGuidance() {
+  return (
+    <aside
+      className="group-creation-guidance"
+      aria-labelledby="group-creation-guidance-title"
+    >
+      <h3 id="group-creation-guidance-title">연결이 먼저예요</h3>
+      <p>
+        wargether의 주된 목적은 서로의 연결입니다. 학습과 여가가 부담이나
+        압박이 되지 않도록 진행해 주세요. 성과와 참여를 강요하기보다 각자의
+        상황과 속도를 존중해 주세요.
+      </p>
+    </aside>
+  );
+}
 const deliveryLabels: Record<string, string> = {
   pending: "기관 전달 준비",
   unconfigured: "기관 연결 대기",
@@ -271,6 +286,7 @@ export default function App() {
       title: profile ? "내 프로필" : "처음 만나는 우리",
       description:
         "닉네임으로 함께해요. 역할은 언제든 바꿀 수 있어요. 연락처는 다른 참여자에게 공개되지 않아요.",
+      content: role === "mentor" ? <GroupCreationGuidance /> : undefined,
       fields: [
         {
           key: "nickname",
@@ -385,19 +401,7 @@ export default function App() {
       title: "함께할 모임 열기",
       description:
         "배우는 시간과 쉬는 시간을 한 쌍으로 만들어요. 구체적인 주제는 참여자들의 제안으로 바꿀 수 있어요.",
-      content: (
-        <aside
-          className="group-creation-guidance"
-          aria-labelledby="group-creation-guidance-title"
-        >
-          <h3 id="group-creation-guidance-title">연결이 먼저예요</h3>
-          <p>
-            wargether의 주된 목적은 서로의 연결입니다. 학습과 여가가 부담이나
-            압박이 되지 않도록 진행해 주세요. 성과와 참여를 강요하기보다 각자의
-            상황과 속도를 존중해 주세요.
-          </p>
-        </aside>
-      ),
+      content: <GroupCreationGuidance />,
       fields: [
         {
           key: "title",
