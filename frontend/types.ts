@@ -34,6 +34,14 @@ export type Member = {
   status: string;
   joined_at: number;
   unannounced_absences: number;
+  absence_dates: string[];
+  absence_logs: {
+    session_id: string;
+    starts_at: number;
+    recorded_at: number;
+    day: string;
+  }[];
+  can_request_care: boolean;
 };
 export type Session = {
   id: string;

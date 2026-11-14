@@ -480,7 +480,7 @@ export default function App() {
         ? `${m.nickname}님의 안부 확인`
         : `${m.nickname}님에 대한 신고`,
       description: care
-        ? "사전 안내 없는 불참 3회가 확인됐어요. 다른 사람의 요청을 반복해서 누적할 수 없으며, 실제 위험을 확정하는 신고는 아니에요."
+        ? `서버 출석 기록에서 사전 안내 없는 불참이 ${m.unannounced_absences}일 확인됐어요. 같은 날의 불참은 한 번만 세며, 실제 위험을 확정하는 신고는 아니에요. 근거 날짜 (${detail?.group.timezone}): ${m.absence_dates.join(", ")}.`
         : "구체적인 행동을 적어 주세요. 신고 내용은 모임장이 검토하며, 현재 참여자의 과반수 신고가 있어야 퇴출할 수 있어요.",
       fields: [
         ...(care
@@ -514,6 +514,34 @@ export default function App() {
         });
         setToast("요청이 접수됐어요.");
       },
+    });
+  const showAbsenceLog = (m: Member) =>
+    setDialog({
+      title: `${m.nickname}님의 불참 확인 로그`,
+      description: `모임 시간대(${detail?.group.timezone}) 기준 서로 다른 ${m.unannounced_absences}일이에요. 종료된 일정에 모임장이 저장한 기록만 집계하며, 사전 안내·통신 장애·취소 일정은 제외해요.`,
+      content: m.absence_logs.length ? (
+        <div className="notice-list">
+          {m.absence_logs.map((log) => (
+            <div className="audit-row" key={log.session_id}>
+              <CalendarDays size={19} />
+              <div>
+                <strong>{log.day} · 안내 없는 불참</strong>
+                <p>모임: {date(log.starts_at, detail?.group.timezone)}</p>
+                <small className="muted">
+                  모임장 {detail?.group.mentor} 기록 ·{" "}
+                  {date(log.recorded_at, detail?.group.timezone)}
+                </small>
+              </div>
+            </div>
+          ))}
+          <p className="tiny muted">
+            최근 10건을 표시해요. 같은 날짜의 기록이 여러 개 있어도 1일로
+            집계해요.
+          </p>
+        </div>
+      ) : (
+        <p className="muted">집계할 수 있는 불참 기록이 없어요.</p>
+      ),
     });
   const addSession = () =>
     ask({
@@ -560,7 +588,7 @@ export default function App() {
     ask({
       title: "출석 기록",
       description:
-        "확인한 사람만 기록해요. 미리 불참을 알렸거나 통신 장애가 있었다면 안부 요청을 위한 불참 횟수에 포함하지 않아요.",
+        "확인한 사람만 기록해요. 안내 없는 불참은 예정된 모임 시간이 끝난 뒤에만 저장할 수 있어요. 사전 안내·통신 장애는 안부 요청의 불참 일수에 포함하지 않아요.",
       fields: people.map((m) => ({
         key: m.user_id,
         label:
@@ -751,11 +779,11 @@ export default function App() {
       <div className="care-guide">
         <div>
           <span className="step">01</span>
-          <h3>안내 없는 불참 3회</h3>
+          <h3>안내 없는 불참 3일</h3>
           <p>
-            모임장이 출석을 확인해요.
+            모임장의 서버 출석 기록으로 확인해요.
             <br />
-            통신 장애·사전 안내는 제외해요.
+            서로 다른 날짜만 세고, 사전 안내·통신 장애는 제외해요.
           </p>
         </div>
         <div>
@@ -1587,28 +1615,43 @@ export default function App() {
                       {m.unannounced_absences > 0 && (
                         <span className="absence-count">
                           {" "}
-                          · 안내 없는 불참 {m.unannounced_absences}회
+                          · 안내 없는 불참 {m.unannounced_absences}일
                         </span>
                       )}
                     </p>
                   </div>
                   <div className="row wrap">
+                    {m.user_id !== g.owner_id && (
+                      <button
+                        className="text-button"
+                        onClick={() => showAbsenceLog(m)}
+                      >
+                        불참 로그
+                      </button>
+                    )}
                     {m.status === "active" &&
                       m.user_id !== user &&
                       m.user_id !== g.owner_id && (
                         <>
-                          {m.unannounced_absences >= 3 && (
-                            <button
-                              className="button secondary small"
-                              onClick={() => reportMember(m, true)}
-                            >
-                              <Heart size={14} />
-                              안부 요청
-                            </button>
-                          )}
+                          <button
+                            className="button secondary small"
+                            disabled={!m.can_request_care}
+                            title={
+                              m.can_request_care
+                                ? "서버에서 3일 이상의 불참 기록을 확인했어요."
+                                : "서로 다른 3일의 사전 안내 없는 불참 기록이 필요해요."
+                            }
+                            onClick={() => reportMember(m, true)}
+                          >
+                            <Heart size={14} />
+                            {m.can_request_care
+                              ? "안부 요청"
+                              : `안부 요청 (${m.unannounced_absences}/3일)`}
+                          </button>
                           <button
                             className="icon-button"
-                            aria-label={`${m.nickname}님 신고`}
+                            aria-label={`${m.nickname}님 행동 신고`}
+                            title="괴롭힘·사기 등 행동 신고"
                             onClick={() => reportMember(m)}
                           >
                             <Flag size={17} />
