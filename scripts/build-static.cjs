@@ -1,0 +1,2 @@
+const fs=require('node:fs/promises'),path=require('node:path');
+(async()=>{const root=path.resolve(__dirname,'..'),out=path.join(root,'build');await fs.rm(out,{recursive:true,force:true});await fs.mkdir(out,{recursive:true});await fs.cp(path.join(root,'frontend/public'),out,{recursive:true});await fs.cp(path.join(root,'shared'),path.join(out,'shared'),{recursive:true});console.log('Static browser-mode build: '+out)})().catch(e=>{console.error(e);process.exitCode=1});
