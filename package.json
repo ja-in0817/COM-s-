@@ -3,11 +3,10 @@
   "version": "0.2.0",
   "private": true,
   "description": "wargether 학습과 여가 기반 연대 플랫폼 개발용 프로토타입",
-  "engines": {
-    "node": ">=22"
-  },
+  "engines": {"node": ">=22"},
   "scripts": {
+    "start": "node backend/src/server.cjs",
     "build": "node scripts/build-static.cjs",
-    "test": "node --test tests/*.test.cjs"
+    "test": "node --test tests/*.test.cjs backend/test/*.test.cjs"
   }
 }

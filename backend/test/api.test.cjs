@@ -1,0 +1,21 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),os=require('node:os'),path=require('node:path'),fs=require('node:fs/promises');
+const {createApp}=require('../src/server.cjs');
+const {StateStore}=require('../src/store.cjs');
+const sample=()=>({version:1,nickname:'test',groups:[],joined:[],saved:[],votes:[],notices:[],attendance:[],reports:[],careCases:[],aidQueue:[],conductCases:[],moderationLog:[]});
+test('API persists data, rejects stale revisions, and isolates local access',async t=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'moa-test-')),file=path.join(dir,'state.json');const {server}=await createApp({file});await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(async()=>{await new Promise(r=>server.close(r));await fs.rm(dir,{recursive:true,force:true})});const base='http://127.0.0.1:'+server.address().port;
+ let r=await fetch(base+'/api/state');assert.equal(r.status,401);
+ r=await fetch(base+'/');assert.equal(r.status,200);const cookie=r.headers.get('set-cookie').split(';')[0];assert.ok((await r.text()).includes('boot.js'));
+ r=await fetch(base+'/api/state',{headers:{cookie}});assert.deepEqual(await r.json(),{revision:0,state:null});
+ const headers={cookie,origin:base,'content-type':'application/json'};
+ r=await fetch(base+'/api/state',{method:'PUT',headers,body:JSON.stringify({state:sample(),expectedRevision:0})});assert.equal(r.status,200);assert.equal((await r.json()).revision,1);
+ r=await fetch(base+'/api/state',{method:'PUT',headers,body:JSON.stringify({state:sample(),expectedRevision:0})});assert.equal(r.status,409);
+ r=await fetch(base+'/api/state',{method:'PUT',headers:{...headers,origin:'https://other.example'},body:'{}'});assert.equal(r.status,403);
+ r=await fetch(base+'/api/state',{method:'PUT',headers,body:JSON.stringify({state:{},expectedRevision:1})});assert.equal(r.status,422);
+ r=await fetch(base+'/api/state',{headers:{cookie}});assert.equal((await r.json()).state.nickname,'test');
+ r=await fetch(base+'/shared/safety-core.js');assert.equal(r.status,200);
+ r=await fetch(base+'/runtime-config.js');assert.ok((await r.text()).includes('server:true'));
+ const badHost=await new Promise((resolve,reject)=>{require('node:http').get(base+'/api/health',{headers:{host:'attacker.example'}},res=>{res.resume();resolve(res.statusCode)}).on('error',reject)});assert.equal(badHost,403);
+ const restarted=await new StateStore(file).init();assert.equal(restarted.read().revision,1);
+});
+test('concurrent snapshots cannot overwrite one another',async t=>{const dir=await fs.mkdtemp(path.join(os.tmpdir(),'moa-store-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));const s=await new StateStore(path.join(dir,'state.json')).init();const r=await Promise.allSettled([s.write(sample(),0),s.write(sample(),0)]);assert.equal(r.filter(x=>x.status==='fulfilled').length,1);assert.equal(r.filter(x=>x.status==='rejected'&&x.reason.status===409).length,1)});
