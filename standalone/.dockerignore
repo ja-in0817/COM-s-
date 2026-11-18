@@ -1,0 +1,13 @@
+node_modules
+dist
+data
+test
+test-results
+.env
+.env.*
+*.sqlite*
+*.db*
+.git
+README.md
+DEPLOYMENT.md
+API_CONTRACT.md

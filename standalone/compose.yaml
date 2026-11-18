@@ -1,0 +1,20 @@
+# Local run. For public use, terminate HTTPS at a reverse proxy and set production/APP_ORIGIN.
+services:
+  moa:
+    build: .
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      APP_ORIGIN: http://localhost:3000
+      DATABASE_PATH: /app/data/moa.sqlite
+      INITIAL_ADMIN_USERNAME: ${INITIAL_ADMIN_USERNAME:-}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
+    volumes:
+      - moa-data:/app/data
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  moa-data:
