@@ -1,0 +1,30 @@
+# Paid web service + persistent disk. Review Render's price before creating resources.
+# Blueprint path: render.yaml at the repository root. No resource is created by this file alone.
+services:
+  - type: web
+    name: moa-youth-independent
+    runtime: docker
+    region: singapore
+    plan: 0.5c-512mb
+    dockerfilePath: ./standalone/Dockerfile
+    dockerContext: ./standalone
+    buildFilter:
+      paths:
+        - standalone/**
+    autoDeployTrigger: off
+    healthCheckPath: /api/health
+    disk:
+      name: moa-data
+      mountPath: /app/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_PATH
+        value: /app/data/moa.sqlite
+      - key: TRUST_RENDER_PROXY
+        value: "1"
+      - key: INITIAL_ADMIN_USERNAME
+        sync: false
+      - key: INITIAL_ADMIN_PASSWORD
+        sync: false
